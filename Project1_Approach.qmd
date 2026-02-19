@@ -1,0 +1,209 @@
+---
+title: "Project 1 – Chess Tournament Cross-Table Parsing Approach"
+author: "Muhammad Suffyan Khan"
+format: html
+---
+
+# Introduction
+
+This project requires transforming a structured but non-tidy chess tournament cross-table into a clean analytical dataset. The required output must contain one row per player with the following fields:
+
+-   Player Name\
+-   Player State\
+-   Total Points\
+-   Pre-Tournament Rating\
+-   Average Pre-Tournament Rating of Opponents
+
+Although the assignment permits substituting another dataset of similar or greater complexity, I have chosen to work independently and use the official tournament cross-table provided. I believe this dataset already presents sufficient structural complexity multi line player records, embedded rating transitions, and opponent identifiers across multiple rounds—to fully demonstrate robust parsing, relational reconstruction, and validation logic.
+
+------------------------------------------------------------------------
+
+# Objective
+
+The primary objective is to reconstruct relational structure from semi-structured tournament text data and compute, for each player:
+
+$$
+\text{Average Opponent Pre-Rating} =
+\frac{\sum \text{(Pre-Rating of Each Opponent Played)}}
+{\text{Number of Games Played}}
+$$
+
+The core difficulty lies not in computing a mean, but in:
+
+-   Correctly identifying each opponent
+-   Linking opponents to their pre tournament ratings
+-   Handling edge cases such as unplayed rounds or byes
+-   Ensuring full reproducibility
+
+------------------------------------------------------------------------
+
+# Overall Strategy
+
+## 1. Data Ingestion
+
+-   Load the tournament text file from a public, accessible source.
+-   Avoid local file paths to ensure reproducibility.
+-   Preserve raw formatting by reading line-by-line.
+
+## 2. Player Block Reconstruction
+
+Each player spans two lines in the cross-table:
+
+-   Line 1: Pair Number, Player Name, Total Points, Round Results\
+-   Line 2: State, USCF ID, Pre/Post Ratings
+
+I will:
+
+-   Detect the beginning of each player record using pair number patterns.
+-   Combine corresponding lines into a single structured record.
+-   Extract relevant fields using string manipulation and regular expressions.
+
+## 3. Variable Extraction
+
+From each reconstructed player record, I will extract:
+
+-   `pair_number`
+-   `player_name`
+-   `state`
+-   `total_points`
+-   `pre_rating`
+-   Opponent identifiers from each round (R1–R7)
+
+Opponent entries appear in forms such as:
+
+-   `W 39`
+-   `L 21`
+-   `D 12`
+
+I will extract only the numeric opponent pair numbers and discard result indicators.
+
+------------------------------------------------------------------------
+
+# Opponent Average Rating Calculation
+
+The computation requires reconstructing opponent relationships.
+
+### Step 1: Create Rating Lookup Table
+
+Create a lookup mapping:
+
+`pair_number to pre_rating`
+
+### Step 2: Extract Valid Opponents
+
+For each player:
+
+-   Collect opponent pair numbers across all rounds.
+-   Remove missing entries or non games.
+-   Count only valid opponents.
+
+### Definition of a Valid Game
+
+A round will be counted as a valid game only if it contains a result indicator (`W`, `L`, or `D`) followed by an opponent pair number.
+
+The following tokens will NOT be counted as games played:
+
+-   `H` (half-point bye)
+-   `B` (bye)
+-   `U` (unplayed)
+-   `X` (forfeit or win-by-absence)
+
+These entries do not represent an opponent with a valid pre-rating and will be excluded from the denominator when calculating the average opponent rating.
+
+### Step 3: Join and Compute Mean
+
+-   Join opponent IDs to the rating lookup table.
+-   Compute the mean of their pre ratings.
+-   Ensure the denominator reflects actual games played.
+
+This process ensures that:
+
+-   A player who played all rounds will average across all opponents.
+-   A player who played fewer rounds will average only across games played.
+
+------------------------------------------------------------------------
+
+# Validation Plan (Manual Test Cases)
+
+Before finalizing results, I will manually verify two required test cases:
+
+## Test Case 1: Player Who Played All Games
+
+-   Identify opponent pair numbers manually.
+-   Retrieve their pre ratings directly from the cross-table.
+-   Compute the average by hand.
+-   Confirm exact agreement with program output.
+
+## Test Case 2: Player Who Played Fewer Than All Games
+
+-   Identify which rounds were actually played.
+-   Exclude any byes or missing rounds.
+-   Manually compute opponent pre rating average.
+-   Confirm correct denominator logic.
+
+This validation step ensures:
+
+-   Correct parsing of opponent IDs\
+-   Accurate mapping to ratings\
+-   Proper handling of missing games\
+-   No inclusion of invalid observations
+
+I consider validation a critical component of professional data workflow.
+
+------------------------------------------------------------------------
+
+# Output Specification
+
+The final dataset will:
+
+-   Contain exactly one row per player
+
+-   Include columns:
+
+    -   `Player_Name`
+    -   `State`
+    -   `Total_Points`
+    -   `Pre_Rating`
+    -   `Average_Opponent_Pre_Rating`
+
+-   Be exported as a clean CSV file.
+
+-   Be reproducible end-to-end.
+
+------------------------------------------------------------------------
+
+# Reproducibility and Professional Standards
+
+To align with professional data engineering practices:
+
+-   All code will be contained within this Quarto file.
+-   Data will be accessed via URL.
+-   No manual intervention will occur.
+-   All transformations will be clearly documented.
+-   Intermediate checks will be performed to ensure exactly 64 players are processed.
+
+------------------------------------------------------------------------
+
+# Additional validation checks will include:
+
+-   Confirming that all opponent pair numbers fall within the valid range of 1–64.
+-   Ensuring that all opponent joins successfully map to a pre-rating.
+-   Verifying that no `NA` pre-ratings are introduced after the join operation.
+
+------------------------------------------------------------------------
+
+# Anticipated Challenges
+
+1.  Correctly grouping two-line player records.
+2.  Ensuring opponent numbers are parsed without capturing result characters.
+3.  Handling irregular spacing within text blocks.
+4.  Avoiding hard coded assumptions about format.
+5.  Preventing silent parsing errors that misalign opponent relationships.
+
+------------------------------------------------------------------------
+
+# Conclusion
+
+This project is fundamentally a relational reconstruction and validation problem. By working independently and using the official dataset, I aim to demonstrate precise parsing, accurate relational joins, rigorous validation through manual testing, and fully reproducible analytical output.
+
+The focus is correctness, transparency, and disciplined data engineering practice rather than superficial transformation.
