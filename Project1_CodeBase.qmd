@@ -1,0 +1,426 @@
+---
+title: "Project 1 – Chess Tournament Cross-Table Parsing CodeBase"
+author: "Muhammad Suffyan Khan"
+date: "2026-02-21"
+format: html
+---
+
+# Introduction
+
+This project requires transforming a structured but non-tidy chess tournament cross-table into a clean analytical dataset. The required output must contain one row per player with the following fields:
+
+-   Player Name\
+-   Player State\
+-   Total Points\
+-   Pre-Tournament Rating\
+-   Average Pre-Tournament Rating of Opponents
+
+Although the assignment permits substituting another dataset of similar or greater complexity, I have chosen to work independently and use the official tournament cross-table provided. I believe this dataset already presents sufficient structural complexity multi line player records, embedded rating transitions, and opponent identifiers across multiple rounds to fully demonstrate robust parsing, relational reconstruction, and validation logic.
+
+------------------------------------------------------------------------
+
+# Objective
+
+The primary objective is to reconstruct relational structure from semi-structured tournament text data and compute, for each player:
+
+$$
+\text{Average Opponent Pre-Rating} =
+\frac{\sum \text{(Pre-Rating of Each Opponent Played)}}
+{\text{Number of Games Played}}
+$$
+
+The core difficulty lies not in computing a mean, but in:
+
+-   Correctly identifying each opponent
+-   Linking opponents to their pre tournament ratings
+-   Handling edge cases such as unplayed rounds or byes
+-   Ensuring full reproducibility
+
+------------------------------------------------------------------------
+
+# Overall Strategy
+
+## 1. Data Ingestion
+
+-   Load the tournament text file from a public, accessible source.
+-   Avoid local file paths to ensure reproducibility.
+-   Preserve raw formatting by reading line-by-line.
+
+## 2. Player Block Reconstruction
+
+Each player spans two lines in the cross-table:
+
+-   Line 1: Pair Number, Player Name, Total Points, Round Results\
+-   Line 2: State, USCF ID, Pre/Post Ratings
+
+I will:
+
+-   Detect the beginning of each player record using pair number patterns.
+-   Combine corresponding lines into a single structured record.
+-   Extract relevant fields using string manipulation and regular expressions.
+
+## 3. Variable Extraction
+
+From each reconstructed player record, I will extract:
+
+-   `pair_number`
+-   `player_name`
+-   `state`
+-   `total_points`
+-   `pre_rating`
+-   Opponent identifiers from each round (R1–R7)
+
+Opponent entries appear in forms such as:
+
+-   `W 39`
+-   `L 21`
+-   `D 12`
+
+I will extract only the numeric opponent pair numbers and discard result indicators.
+
+------------------------------------------------------------------------
+
+# Opponent Average Rating Calculation
+
+The computation requires reconstructing opponent relationships.
+
+### Step 1: Create Rating Lookup Table
+
+Create a lookup mapping:
+
+`pair_number to pre_rating`
+
+### Step 2: Extract Valid Opponents
+
+For each player:
+
+-   Collect opponent pair numbers across all rounds.
+-   Remove missing entries or non games.
+-   Count only valid opponents.
+
+### Definition of a Valid Game
+
+A round will be counted as a valid game only if it contains a result indicator (`W`, `L`, or `D`) followed by an opponent pair number.
+
+The following tokens will NOT be counted as games played:
+
+-   `H` (half-point bye)
+-   `B` (bye)
+-   `U` (unplayed)
+-   `X` (forfeit or win-by-absence)
+
+These entries do not represent an opponent with a valid pre-rating and will be excluded from the denominator when calculating the average opponent rating.
+
+### Step 3: Join and Compute Mean
+
+-   Join opponent IDs to the rating lookup table.
+-   Compute the mean of their pre ratings.
+-   Ensure the denominator reflects actual games played.
+
+This process ensures that:
+
+-   A player who played all rounds will average across all opponents.
+-   A player who played fewer rounds will average only across games played.
+
+------------------------------------------------------------------------
+
+# Validation Plan (Manual Test Cases)
+
+Before finalizing results, I will manually verify two required test cases:
+
+## Test Case 1: Player Who Played All Games
+
+-   Identify opponent pair numbers manually.
+-   Retrieve their pre ratings directly from the cross-table.
+-   Compute the average by hand.
+-   Confirm exact agreement with program output.
+
+## Test Case 2: Player Who Played Fewer Than All Games
+
+-   Identify which rounds were actually played.
+-   Exclude any byes or missing rounds.
+-   Manually compute opponent pre rating average.
+-   Confirm correct denominator logic.
+
+This validation step ensures:
+
+-   Correct parsing of opponent IDs\
+-   Accurate mapping to ratings\
+-   Proper handling of missing games\
+-   No inclusion of invalid observations
+
+I consider validation a critical component of professional data workflow.
+
+------------------------------------------------------------------------
+
+# Output Specification
+
+The final dataset will:
+
+-   Contain exactly one row per player
+
+-   Include columns:
+
+    -   `Player_Name`
+    -   `State`
+    -   `Total_Points`
+    -   `Pre_Rating`
+    -   `Average_Opponent_Pre_Rating`
+
+-   Be exported as a clean CSV file.
+
+-   Be reproducible end-to-end.
+
+------------------------------------------------------------------------
+
+# Reproducibility and Professional Standards
+
+To align with professional data engineering practices:
+
+-   All code will be contained within this Quarto file.
+-   Data will be accessed via URL.
+-   No manual intervention will occur.
+-   All transformations will be clearly documented.
+-   Intermediate checks will be performed to ensure exactly 64 players are processed.
+
+------------------------------------------------------------------------
+
+# Additional validation checks will include:
+
+-   Confirming that all opponent pair numbers fall within the valid range of 1–64.
+-   Ensuring that all opponent joins successfully map to a pre-rating.
+-   Verifying that no `NA` pre-ratings are introduced after the join operation.
+
+------------------------------------------------------------------------
+
+# Anticipated Challenges
+
+1.  Correctly grouping two-line player records.
+2.  Ensuring opponent numbers are parsed without capturing result characters.
+3.  Handling irregular spacing within text blocks.
+4.  Avoiding hard coded assumptions about format.
+5.  Preventing silent parsing errors that misalign opponent relationships.
+
+------------------------------------------------------------------------
+
+# Code
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(dplyr)
+library(stringr)
+library(purrr)
+library(tidyr)
+library(readr)
+```
+
+```{r}
+tournament_url <- "https://raw.githubusercontent.com/suffyankhan77/Project1-DATA-607/main/Tournament_Info.txt"
+
+raw_lines <- readLines(tournament_url, warn = FALSE)
+
+# Quick sanity checks
+length(raw_lines)
+raw_lines[1:10]
+```
+
+```{r}
+# Line 1 starts with a pair number then "|"
+is_line1 <- str_detect(raw_lines, "^\\s*\\d+\\s*\\|")
+
+# Line 2 starts with a state abbreviation then "|"
+is_line2 <- str_detect(raw_lines, "^\\s*[A-Z]{2}\\s*\\|")
+
+line1 <- raw_lines[is_line1]
+line2 <- raw_lines[is_line2]
+
+length(line1)
+length(line2)
+```
+
+```{r}
+pair_number <- as.integer(str_match(line1, "^\\s*(\\d+)\\s*\\|")[,2])
+
+player_name <- str_match(line1, "^\\s*\\d+\\s*\\|\\s*(.*?)\\s*\\|")[,2] %>%
+  str_squish()
+
+total_points <- as.numeric(str_match(line1, "\\|\\s*([0-9]+\\.?[0-9]*)\\s*\\|")[,2])
+
+# Extract all round result tokens (everything after total points column)
+# We'll just keep the full line and later extract opponents via regex.
+line1_df <- tibble(
+  pair_number = pair_number,
+  player_name = str_to_title(player_name),
+  total_points = total_points,
+  line1_raw = line1
+)
+
+line1_df %>% slice(1:5)
+```
+
+```{r}
+state <- str_match(line2, "^\\s*([A-Z]{2})\\s*\\|")[,2]
+
+# Capture the numeric part right after "R:"
+# This works for values like:
+# "R: 1794   ->1817"
+# "R: 1641P17->1657P24"
+pre_rating <- as.integer(str_match(line2, "R:\\s*([0-9]+)")[,2])
+
+line2_df <- tibble(
+  state = state,
+  pre_rating = pre_rating,
+  line2_raw = line2
+)
+
+line2_df %>% slice(1:5)
+```
+
+```{r}
+players <- bind_cols(line1_df %>% select(pair_number, player_name, total_points, line1_raw),
+                     line2_df %>% select(state, pre_rating, line2_raw)) %>%
+  arrange(pair_number)
+
+players %>% slice(1:10)
+```
+
+```{r}
+```
+
+```{r}
+extract_opponents <- function(x) {
+  # returns integer vector of opponent pair numbers
+  opp <- str_match_all(x, "(W|L|D)\\s*(\\d+)")[[1]]
+  if (nrow(opp) == 0) return(integer(0))
+  as.integer(opp[,3])
+}
+
+players <- players %>%
+  mutate(opponents = map(line1_raw, extract_opponents),
+         games_played = map_int(opponents, length))
+
+players %>% select(pair_number, player_name, total_points, games_played, opponents) %>% slice(1:12)
+```
+
+```{r}
+rating_lookup <- players %>% select(pair_number, pre_rating)
+
+players <- players %>%
+  mutate(
+    opponent_pre_ratings = map(
+      opponents,
+      ~ rating_lookup %>%
+        filter(pair_number %in% .x) %>%
+        pull(pre_rating)
+    ),
+    avg_opp_pre_rating = map_dbl(
+  opponent_pre_ratings,
+  ~ if (length(.x) == 0) NA_real_ else round(mean(.x), 0)
+)
+  )
+
+players %>% select(pair_number, player_name, pre_rating, opponents, opponent_pre_ratings, avg_opp_pre_rating) %>% slice(1:12)
+```
+
+```{r}
+players %>%
+  filter(pair_number == 1) %>%
+  select(pair_number, player_name, pre_rating, opponents, opponent_pre_ratings, avg_opp_pre_rating)
+```
+
+### Manual Verification
+
+For Player 1 (Pair #1), the opponents played were:
+
+39, 21, 18, 14, 7, 12, 4
+
+Their corresponding pre-ratings are:
+
+1436, 1563, 1600, 1610, 1649, 1663, 1716
+
+Hand calculation:
+
+Sum = 1436 + 1563 + 1600 + 1610 + 1649 + 1663 + 1716\
+Sum = 11237
+
+Number of games played = 7
+
+Average = 11237 / 7 = 1605.2857\
+Rounded to nearest integer = 1605
+
+The program output for Player 1 is 1605, confirming correct extraction, mapping, and denominator logic.
+
+```{r}
+players %>%
+  filter(pair_number %in% c(12, 16)) %>%
+  select(pair_number, player_name, pre_rating, total_points, games_played, opponents, opponent_pre_ratings, avg_opp_pre_rating)
+```
+
+### Manual Verification
+
+For Player 16 (Pair #16), the valid games were against:
+
+10, 15, 39, 2, 36
+
+The entries "H" and "U" are excluded because they do not represent valid opponents.
+
+Their corresponding pre-ratings are:
+
+1365, 1220, 1436, 1553, 1355
+
+Hand calculation:
+
+Sum = 1365 + 1220 + 1436 + 1553 + 1355\
+Sum = 6929
+
+Number of valid games played = 5
+
+Average = 6929 / 5 = 1385.8\
+Rounded to nearest integer = 1386
+
+The program output (1386) matches the hand calculation, confirming correct handling of partial participation and exclusion of non-games.
+
+```{r}
+# 1) Exactly 64 players
+stopifnot(nrow(players) == 64)
+
+# 2) Opponent IDs must be between 1 and 64
+all_opps <- unlist(players$opponents)
+stopifnot(all(all_opps >= 1 & all_opps <= 64))
+
+# 3) No NA opponent ratings after join (for valid games)
+# If there is a valid opponent number, its rating must exist
+stopifnot(!any(is.na(unlist(players$opponent_pre_ratings))))
+
+summary(players$avg_opp_pre_rating)
+```
+
+```{r}
+final_df <- players %>%
+  transmute(
+    Player_Name = str_to_title(player_name),
+    State = state,
+    Total_Points = total_points,
+    Pre_Rating = pre_rating,
+    Average_Opponent_Pre_Rating = round(avg_opp_pre_rating, 0)
+  )
+
+final_df %>% slice(1:10)
+
+write_csv(final_df, "Project1_Chess_Summary.csv")
+```
+
+# Conclusion
+
+This project demonstrates the reconstruction of structured relational data from a semi-structured chess tournament cross-table. The primary challenge was not computing a simple mean, but correctly parsing multi-line player records, identifying valid opponents, excluding non games (`H`, `B`, `U`, `X`), and reconstructing opponent relationships using pair numbers.
+
+The final dataset contains one row per player with the required fields: Player Name, State, Total Points, Pre-Tournament Rating, and Average Opponent Pre-Rating. All results were validated using two manual test cases,One player who participated in all rounds and one who played fewer games to confirm correct extraction, denominator logic, and rounding behavior.
+
+Additional quality checks ensured:\
+- Exactly 64 players were processed.\
+- All opponent identifiers fell within valid bounds.\
+- No missing ratings were introduced during joins.
+
+The workflow is fully reproducible, as the raw data is accessed via a public GitHub URL and all transformations are contained within this Quarto file.
+
+Overall, this project highlights the importance of validation, reproducibility, and careful relational reconstruction when working with semi structured data formats.
